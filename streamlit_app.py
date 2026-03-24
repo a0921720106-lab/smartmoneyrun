@@ -28,7 +28,10 @@ if st.button("🚀 啟動全市場 1800+ 檔深度掃描"):
     with st.spinner("正在初始化全市場清單..."):
         stock_info = dl.taiwan_stock_info()
         # 只取 4 位數代碼的普通股，排除權證與 ETF
-        full_list = stock_info[stock_info['stock_id'].str.len() == 4]['stock_id'].tolist()
+        full_list = stock_info[
+            (stock_info['stock_id'].str.len() == 4) & 
+            (~stock_info['stock_id'].str.startswith('0'))
+        ]['stock_id'].tolist()
         total_stocks = len(full_list)
         
     st.write(f"📊 偵測到全市場共 {total_stocks} 檔標的，開始掃描...")
