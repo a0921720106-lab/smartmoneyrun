@@ -2,3 +2,5 @@ streamlit
 FinMind
 pandas
 requests
+tqdm
+scikit-learn
