@@ -53,15 +53,19 @@ if st.button("🚀 啟動全市場 1800+ 檔深度掃描"):
             
             if len(dates) < 4: continue 
             
-            # 計算每週大戶(400+)與散戶(30-)比例
-            w_big = [dist[dist['date']==d][dist['HoldersLevel'].isin(['400-600','600-800','800-1000','1000以上'])]['percent'].sum() for d in dates]
-            w_small = [dist[dist['date']==d][dist['HoldersLevel'].isin(['1-5','5-10','10-15','15-20','20-30'])]['percent'].sum() for d in dates]
+            # --- 關鍵：先計算出 w_big 和 w_small 的數值 ---
+            # 計算大戶 (400張以上) 與 散戶 (30張以下) 比例
+            w_big = [dist[dist['date']==d]['HoldersLevel'].isin(['400-600','600-800','800-1000','1000以上']).sum() for d in dates]
+            w_small = [dist[dist['date']==d]['HoldersLevel'].isin(['1-5','5-10','10-15','15-20','20-30']).sum() for d in dates]
+
+            # 1. 先定義大戶趨勢 (big_trend)
+            big_trend = (w_big[3] > w_big[0]) and (w_big[3] >= w_big[2])
             
-            # 判斷趨勢：大戶連三增、散戶連三減
-            is_chip = (w_big[3] > w_big[0] > w_big[3] > w_big[2]) and \
-                      (w_small[3] < w_small[0] < w_small[3] < w_small[2])
+            # 2. 再定義散戶趨勢 (small_trend)
+            small_trend = (w_small[3] < w_small[0]) and (w_small[3] <= w_small[2])
             
-            if not is_chip: continue 
+            # 3. 最後合併判斷
+            is_chip = big_trend and small_trend
 
             # --- B. 借券資料：近 15 天趨勢 ---
             margin = dl.taiwan_stock_margin_purchase_short_sale(stock_id=stock_id, start_date='2024-03-01').tail(15)
