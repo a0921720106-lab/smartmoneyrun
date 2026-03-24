@@ -58,8 +58,8 @@ if st.button("🚀 啟動全市場 1800+ 檔深度掃描"):
             w_small = [dist[dist['date']==d][dist['HoldersLevel'].isin(['1-5','5-10','10-15','15-20','20-30'])]['percent'].sum() for d in dates]
             
             # 判斷趨勢：大戶連三增、散戶連三減
-            is_chip = (w_big[3] > w_big[2] > w_big[1] > w_big[0]) and \
-                      (w_small[3] < w_small[2] < w_small[1] < w_small[0])
+            is_chip = (w_big[3] > w_big[0] > w_big[3] > w_big[2]) and \
+                      (w_small[3] < w_small[0] < w_small[3] < w_small[2])
             
             if not is_chip: continue 
 
