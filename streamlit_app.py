@@ -3,58 +3,58 @@ import pandas as pd
 from FinMind.data import DataLoader
 
 st.set_page_config(page_title="6187 籌碼診斷工具", layout="wide")
-st.title("🔍 股票代碼 6187 (萬潤) 籌碼資料深層診斷")
+st.title("🔍 股票代碼 6187 (萬潤) 資料穩定性診斷")
 
 dl = DataLoader()
 stock_id = '6187'
 
-# 1. 抓取原始籌碼資料
-st.subheader("第一步：抓取原始集保資料")
-dist = dl.taiwan_stock_holding_shares_per(stock_id=stock_id, start_date='2024-01-01')
+# 1. 安全抓取資料函數
+def safe_get_data(func, **kwargs):
+    try:
+        data = func(**kwargs)
+        if data is None or data.empty:
+            return pd.DataFrame()
+        return data
+    except Exception as e:
+        st.warning(f"⚠️ 抓取資料時發生小插曲: {e}")
+        return pd.DataFrame()
+
+# 開始診斷
+st.subheader("第一步：檢查籌碼資料來源")
+dist = safe_get_data(dl.taiwan_stock_holding_shares_per, stock_id=stock_id, start_date='2024-01-01')
 
 if dist.empty:
-    st.error("❌ 錯誤：API 回傳 6187 的籌碼資料是空的！可能是流量限制或 API 暫時失效。")
+    st.error("❌ 無法從 FinMind 取得 6187 的籌碼資料。這可能是 API 流量限制或該股票資料尚未更新。")
+    st.info("💡 建議：如果您頻繁重新整理網頁，請稍等一分鐘再試，或申請 FinMind Token 加入程式中。")
 else:
-    st.success(f"✅ 成功抓取資料，共 {len(dist)} 筆。")
+    st.success(f"✅ 成功抓取到 {len(dist)} 筆籌碼數據")
     
-    # 檢查日期
+    # 顯示原始資料片段，確認欄位名稱
+    with st.expander("查看原始數據前 5 筆"):
+        st.write(dist.head())
+
+    # 執行原本的計算邏輯...
     available_dates = sorted(dist['date'].unique())
-    st.write(f"📅 資料庫中的最新 4 個日期：{available_dates[-4:]}")
+    dates = available_dates[-4:] if len(available_dates) >= 4 else available_dates
     
-    # 檢查 HoldersLevel 的名稱 (這最關鍵)
-    st.write("📊 API 回傳的持股分級名稱 (請檢查是否有空格或全形字)：")
-    st.write(dist['HoldersLevel'].unique().tolist())
+    st.write(f"📅 診斷日期對象: {dates}")
 
-    # 2. 模擬計算邏輯
-    st.subheader("第二步：模擬大戶/散戶計算")
-    dates = available_dates[-4:]
-    
-    # 定義我們要比對的字串
+    # 計算大戶/散戶 (加入 HoldersLevel 字串檢查)
     big_levels = ['400-600','600-800','800-1000','1000以上']
-    small_levels = ['1-5','5-10','10-15','15-20','20-30']
     
-    diag_data = []
+    res = []
     for d in dates:
-        day_df = dist[dist['date'] == d]
-        # 計算大戶
-        b_val = day_df[day_df['HoldersLevel'].isin(big_levels)]['percent'].sum()
-        # 計算散戶
-        s_val = day_df[day_df['HoldersLevel'].isin(small_levels)]['percent'].sum()
-        diag_data.append({"日期": d, "大戶%": b_val, "散戶%": s_val})
+        temp = dist[dist['date'] == d]
+        # 這裡多加一個 debug，看看有沒有抓到任何等級
+        b_sum = temp[temp['HoldersLevel'].isin(big_levels)]['percent'].sum()
+        res.append({"Date": d, "Big_Percent": b_sum})
     
-    df_diag = pd.DataFrame(diag_data)
-    st.table(df_diag)
+    st.table(pd.DataFrame(res))
 
-    # 3. 邏輯判定診斷
-    st.subheader("第三步：趨勢判定檢查")
-    w_big = df_diag['大戶%'].tolist()
-    w_small = df_diag['散戶%'].tolist()
-    
-    c1 = w_big[3] > w_big[0]
-    c2 = w_big[3] >= w_big[2]
-    c3 = w_small[3] < w_small[0]
-    c4 = w_small[3] <= w_small[2]
-    
-    st.write(f"1. 本週大戶 > 三週前 ({w_big[3]} > {w_big[0]}): {'✅' if c1 else '❌'}")
-    st.write(f"2. 本週大戶 >= 上週 ({w_big[3]} >= {w_big[2]}): {'✅' if c2 else '❌'}")
-    st.write(f"3. 本週散戶 < 三週前 ({w_small[3]} < {w_small[0]}): {'✅' if c3 else '❌'}")
+st.divider()
+st.subheader("第二步：檢查股價資料")
+price = safe_get_data(dl.taiwan_stock_daily, stock_id=stock_id, start_date='2024-03-01')
+if not price.empty:
+    st.write(f"📈 最新收盤價: {price['close'].iloc[-1]}")
+else:
+    st.warning("⚠️ 暫時抓不到股價資料，請檢查 API 狀態。")
