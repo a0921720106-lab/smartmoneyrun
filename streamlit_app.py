@@ -46,9 +46,12 @@ if st.button("🚀 啟動全市場深度掃描"):
             if i % 10 == 0:
                 status_text.text(f"掃描進度: {i+1} / {total_stocks} (正在檢查 {stock_id})")
             
-            # --- A. 籌碼資料 ---
-            dist = dl.taiwan_stock_holding_shares_per(stock_id=stock_id, start_date='2024-02-01').tail(4 * 15)
-            dates = dist['date'].unique()[-4:]
+            # --- 修正版：確保只抓有資料的日期 ---
+            dist = dl.taiwan_stock_holding_shares_per(stock_id=stock_id, start_date='2024-02-01')
+            # 剔除掉可能存在的空值，並只取最後 4 個有紀錄的結算日
+            all_dates = sorted(dist['date'].unique())
+            if len(all_dates) < 4: continue
+            dates = all_dates[-4:]
             
             if len(dates) < 4: continue 
             
@@ -57,7 +60,7 @@ if st.button("🚀 啟動全市場深度掃描"):
             w_small = [dist[(dist['date']==d) & (dist['HoldersLevel'].isin(['1-5','5-10','10-15','15-20','20-30']))]['percent'].sum() for d in dates]
 
             # 趨勢邏輯：這週比3週前好，且這週比上週好 (容許中間一週小波動)
-            big_trend = (w_big[3] > w_big[0]) and (w_big[3] >= w_big[2])
+            big_trend = (w_big[3] > w_big[2]) and (w_big[1] >= w_big[0])
             small_trend = (w_small[3] < w_small[0]) and (w_small[3] <= w_small[2])
             
             if not (big_trend and small_trend): continue
