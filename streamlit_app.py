@@ -2,7 +2,7 @@ import streamlit as st
 
 st.title("$$$大戶哪裡跑")
 st.write(
-    "Let's start building! For help and inspiration, head over to [docs.streamlit.io](https://docs.streamlit.io/)."
+    "新手看價、老手看量、高手看籌碼"
 )
 import streamlit as st
 import pandas as pd
