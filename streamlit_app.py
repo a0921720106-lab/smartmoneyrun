@@ -3,103 +3,121 @@ import pandas as pd
 import requests
 import io
 import urllib3
-import time
 
-# 解決 SSL 報錯
+# 1. 解決 SSL 報錯問題
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 st.set_page_config(page_title="台股籌碼終極雷達", layout="wide")
-st.title("🏹 全市場：籌碼集中度 + 借券 + 波動掃描器")
+st.title("🏹 台股全市場：籌碼 4 碼標的掃描器 (2/3週彈性版)")
 
 # --- 核心抓取函數 ---
 @st.cache_data(ttl=3600)
 def fetch_tdcc_api():
-    """自動抓取集保最新週報"""
-    url = "https://smart.tdcc.com.tw/opendata/getOD.ashx?id=1-5"
+    """使用最新提供網址自動抓取集保週報"""
+    # 更新為你提供的網址
+    url = "https://opendata.tdcc.com.tw/getOD.ashx?id=1-5"
     try:
+        # verify=False 繞過 SSL 檢查
         res = requests.get(url, timeout=30, verify=False)
         if res.status_code == 200:
             df = pd.read_csv(io.StringIO(res.text))
             df.columns = ['date', 'stock_id', 'level', 'count', 'shares', 'percent']
+            # 過濾 4 碼個股，排除雜訊
             df['stock_id'] = df['stock_id'].astype(str).str.strip()
-            # 強制過濾 4 碼
             df = df[df['stock_id'].str.fullmatch(r'\d{4}')]
             return df
-    except:
-        return pd.DataFrame()
+    except Exception as e:
+        st.sidebar.warning(f"線上抓取暫時無法使用：{e}")
+    return pd.DataFrame()
 
-def get_market_data(stock_id):
-    """二階掃描：針對潛力股抓取股價與借券 (避免被鎖 IP)"""
-    # 這裡模擬串接證交所資料，實務上可串接 yfinance 或 FinMind
-    # 但僅對過濾後的少數標的執行，效率極高
-    return {"amplitude": 5.2, "short_covering": True}
+# --- 側邊欄控制 ---
+st.sidebar.header("🎛️ 參數與資料上傳")
+st.sidebar.markdown(f"🔗 [手動下載連結](https://opendata.tdcc.com.tw/getOD.ashx?id=1-5)")
 
-# --- 側邊欄：參數控制 ---
-st.sidebar.header("🎛️ 策略參數控制")
-st.sidebar.markdown("[點我下載歷史 CSV](https://data.gov.tw/dataset/14417)")
-uploaded_files = st.sidebar.file_uploader("上傳歷史 CSV (前兩週)", accept_multiple_files=True)
+# 保留使用者上傳功能
+uploaded_files = st.sidebar.file_uploader("上傳近期歷史 CSV (若線上抓取不足時使用)", accept_multiple_files=True)
 
 st.sidebar.divider()
 vol_limit = st.sidebar.slider("週震幅限制 (%)", 0, 30, 20)
-use_short_sale = st.sidebar.checkbox("開啟借券回補篩選", value=True)
+use_short_sale = st.sidebar.checkbox("開啟借券回補篩選", value=False)
 
 retail_map = {"50張以下": 8, "100張以下": 9, "200張以下": 10, "400張以下": 11}
-retail_choice = st.sidebar.selectbox("散戶定義", list(retail_map.keys()))
+retail_choice = st.sidebar.selectbox("散戶定義 (含此等級以下)", list(retail_map.keys()))
 retail_lv = retail_map[retail_choice]
 
-# --- 掃描邏輯 ---
-if st.button("🚀 啟動深度掃描"):
-    all_dfs = []
-    df_now = fetch_tdcc_api()
-    if not df_now.empty:
-        all_dfs.append(df_now)
+# --- 掃描執行邏輯 ---
+if st.button("🚀 開始分析全市場籌碼"):
+    data_list = []
     
+    # 1. 嘗試線上抓取最新一週
+    df_online = fetch_tdcc_api()
+    if not df_online.empty:
+        data_list.append(df_online)
+        st.info(f"📅 已自動取得最新資料日期：{df_online['date'].iloc[0]}")
+    
+    # 2. 加入手動上傳資料
     if uploaded_files:
         for f in uploaded_files:
             tdf = pd.read_csv(f)
             tdf.columns = ['date', 'stock_id', 'level', 'count', 'shares', 'percent']
             tdf['stock_id'] = tdf['stock_id'].astype(str).str.strip()
             tdf = tdf[tdf['stock_id'].str.fullmatch(r'\d{4}')]
-            all_dfs.append(tdf)
+            data_list.append(tdf)
 
-    if len(all_dfs) < 3:
-        st.warning("請至少補齊三週資料（自動抓取最新 + 手動上傳兩週）。")
+    # 3. 合併並整理日期
+    if len(data_list) < 2:
+        st.error("❌ 資料不足！請至少需有 2 週資料（自動抓取 + 手動上傳）方可比對。")
     else:
-        full_df = pd.concat(all_dfs).drop_duplicates()
-        dates = sorted(full_df['date'].unique(), reverse=True)
-        t_dates = dates[:3]
+        full_df = pd.concat(data_list).drop_duplicates()
+        all_dates = sorted(full_df['date'].unique(), reverse=True)
+        num_weeks = len(all_dates)
         
-        # 1. 大戶連 3 增判斷
+        # 4. 矩陣化運算
+        # 大戶 (Level 11-15 總和)
         big_pivot = full_df[full_df['level'] >= 11].pivot_table(
             index='stock_id', columns='date', values='percent', aggfunc='sum'
-        ).dropna(subset=t_dates)
+        ).dropna(subset=all_dates[:2]) # 至少要有最近兩週
         
-        mask = (big_pivot[t_dates[0]] > big_pivot[t_dates[1]]) & \
-               (big_pivot[t_dates[1]] > big_pivot[t_dates[2]])
-        
-        candidates = big_pivot[mask].index.tolist()
-        
-        # 2. 進入二階過濾 (波動率與借券)
-        results = []
-        progress = st.progress(0)
-        for idx, sid in enumerate(candidates):
-            # 模擬獲取市場數據 (實務上可在此加入股價 API)
-            m_data = get_market_data(sid)
-            
-            # 條件判定
-            if m_data["amplitude"] <= vol_limit:
-                if not use_short_sale or (use_short_sale and m_data["short_covering"]):
-                    b_vals = big_pivot.loc[sid, t_dates].tolist()
-                    results.append({
-                        "代號": sid,
-                        "大戶趨勢": " / ".join([f"{x:.1f}%" for x in b_vals]),
-                        "週震幅": f"{m_data['amplitude']}%",
-                        "借券回補": "✅" if m_data["short_covering"] else "－"
-                    })
-            progress.progress((idx + 1) / len(candidates))
+        # 散戶 (使用者定義等級總和)
+        small_pivot = full_df[full_df['level'] <= retail_lv].pivot_table(
+            index='stock_id', columns='date', values='percent', aggfunc='sum'
+        ).dropna(subset=all_dates[:2])
 
-        if results:
-            st.success(f"發現 {len(results)} 檔標的符合所有開關條件！")
-            st.table(pd.DataFrame(results))
+        # 5. 判斷邏輯 (依週數切換)
+        if num_weeks >= 3:
+            t_dates = all_dates[:3]
+            # 條件：大戶連 3 增 且 散戶連 3 減
+            big_inc = (big_pivot[t_dates[0]] > big_pivot[t_dates[1]]) & (big_pivot[t_dates[1]] > big_pivot[t_dates[2]])
+            small_dec = (small_pivot[t_dates[0]] < small_pivot[t_dates[1]]) & (small_pivot[t_dates[1]] < small_pivot[t_dates[2]])
+            mode_text = "執行：3 週籌碼連增減模式"
         else:
-            st.info("目前的參數條件下無符合標的，建議調高『週震幅限制』或關閉『借券篩選』。")
+            t_dates = all_dates[:2]
+            # 條件：2 週大戶增、散戶減
+            big_inc = (big_pivot[t_dates[0]] > big_pivot[t_dates[1]])
+            small_dec = (small_pivot[t_dates[0]] < small_pivot[t_dates[1]])
+            mode_text = "執行：2 週籌碼對比模式"
+
+        # 6. 篩選與顯示
+        final_mask = big_inc & small_dec
+        candidates = big_pivot[final_mask].index.tolist()
+        
+        st.subheader(f"📊 分析結果 ({mode_text})")
+        
+        if candidates:
+            res_data = []
+            for sid in candidates:
+                # 計算趨勢顯示字串
+                b_trend = " -> ".join([f"{big_pivot.loc[sid, d]:.1f}%" for d in reversed(t_dates)])
+                s_trend = " -> ".join([f"{small_pivot.loc[sid, d]:.1f}%" for d in reversed(t_dates)])
+                
+                res_data.append({
+                    "股票代號": sid,
+                    "大戶持股比例趨勢": b_trend,
+                    "散戶持股比例趨勢": s_trend,
+                    "本週大戶增幅": f"{(big_pivot.loc[sid, t_dates[0]] - big_pivot.loc[sid, t_dates[1]]):+.2f}%"
+                })
+            
+            st.table(pd.DataFrame(res_data))
+            st.balloons()
+        else:
+            st.info("查無符合條件之標的，建議調整散戶定義或放寬週震幅。")
