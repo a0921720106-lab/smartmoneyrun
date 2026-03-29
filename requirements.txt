@@ -3,3 +3,4 @@ FinMind
 pandas
 requests
 tqdm
+yfinance
