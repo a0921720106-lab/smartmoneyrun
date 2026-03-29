@@ -7,7 +7,7 @@ import glob
 
 # 設定頁面
 st.set_page_config(page_title="台股籌碼終極雷達", layout="wide")
-st.title("🏹 全市場：大戶增 + 散戶減 (持久化儲存版)")
+st.title("🏹 全市場：大戶增 + 散戶減 (育萍專用測試版)")
 
 # --- 1. 資料持久化設定 ---
 STORAGE_DIR = "saved_csv_data"
