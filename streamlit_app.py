@@ -77,25 +77,57 @@ with tab1:
             big_pivot['avg_big'] = big_pivot[dates].mean(axis=1)
             small_pivot['avg_small'] = small_pivot[dates].mean(axis=1)
             
+            # 初步籌碼篩選
             mask = (big_pivot[t_new] > (big_pivot['avg_big'] + strength_offset)) & \
                    (small_pivot[t_new] < small_pivot['avg_small']) & \
-                   (big_pivot.index.str.len() == 4) # 僅限個股
+                   (big_pivot.index.str.len() == 4)
             
             candidates = big_pivot[mask].index.tolist()
+            
             if candidates:
                 results = []
-                for sid in candidates:
-                    # 簡化：這裡先略過 yfinance 震幅檢查以加快演示速度
-                    diff = big_pivot.loc[sid, t_new] - big_pivot.loc[sid, 'avg_big']
-                    results.append({"代號": sid, "目前大戶%": big_pivot.loc[sid, t_new], "超額增持": diff})
+                st.write(f"🔍 正在檢查 {len(candidates)} 檔標的的週震幅...")
+                prog = st.progress(0)
                 
-                st.table(pd.DataFrame(results).sort_values(by="超額增持", ascending=False))
+                for i, sid in enumerate(candidates):
+                    prog.progress((i + 1) / len(candidates))
+                    amp = 999  # 預設震幅無窮大
+                    try:
+                        # 修正：將 yfinance 邏輯補回
+                        data = yf.download(f"{sid}.TW", period="10d", progress=False, multi_level_index=False)
+                        if data.empty:
+                            data = yf.download(f"{sid}.TWO", period="10d", progress=False, multi_level_index=False)
+                        
+                        if not data.empty:
+                            recent = data.tail(5) # 抓最近 5 個交易日代表本週
+                            hi, lo = float(recent['High'].max()), float(recent['Low'].min())
+                            amp = round(((hi - lo) / lo) * 100, 2)
+                    except: 
+                        pass
+                    
+                    # 真正執行震幅過濾
+                    if amp <= vol_limit:
+                        diff = big_pivot.loc[sid, t_new] - big_pivot.loc[sid, 'avg_big']
+                        results.append({
+                            "代號": sid, 
+                            "目前大戶%": f"{big_pivot.loc[sid, t_new]:.2f}%", 
+                            "超額增持": round(diff, 2),
+                            "週震幅": f"{amp}%"
+                        })
+                
+                if results:
+                    st.success(f"🎯 篩選完成，符合震幅限制共 {len(results)} 檔")
+                    res_df = pd.DataFrame(results).sort_values(by="超額增持", ascending=False)
+                    st.table(res_df)
+                else:
+                    st.warning(f"❌ 籌碼合格，但這 {len(candidates)} 檔股票的週震幅皆超過 {vol_limit}%。")
+            else:
+                st.info("目前沒有標的符合籌碼增持條件。")
         else:
             st.error("請先上傳 CSV 資料。")
 
 with tab2:
-    st.subheader("📋 填入目前持股 (輸入 4 碼代號，如: 2330, 2317)")
-    # 使用 multiselect 或 text_input 讓使用者輸入
+    st.subheader("📋 填入目前持股 (輸入 4 碼代號)")
     my_stocks_input = st.text_input("請輸入股票代號，用逗號或空白分隔（最多 10 檔）", value="")
     my_stocks = [s.strip() for s in re.split(r'[ ,]+', my_stocks_input) if len(s.strip()) == 4][:10]
 
@@ -113,10 +145,7 @@ with tab2:
                     history = big_pivot.loc[sid, dates].dropna()
                     current = history[t_new]
                     avg = history.mean()
-                    
-                    # 計算位階 (Percentile Rank)：目前持股在歷史中贏過多少週
                     rank = (history < current).sum() / len(history) * 100
-                    
                     status = "✅ 籌碼高檔" if current >= avg else "⚠️ 跌破均線"
                     
                     monitor_results.append({
@@ -129,8 +158,6 @@ with tab2:
                     })
                 
                 st.table(pd.DataFrame(monitor_results))
-                
-                # 繪製對比圖表
                 st.write("📈 私藏股大戶軌跡對比")
                 trend_df = big_pivot.loc[valid_stocks, reversed(dates)].T
                 st.line_chart(trend_df)
