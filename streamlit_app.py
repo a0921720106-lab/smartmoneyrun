@@ -1,3 +1,10 @@
+import streamlit as st
+import pandas as pd
+import yfinance as yf
+import re
+import os
+import glob
+import numpy as np
 
 # 設定頁面
 st.set_page_config(page_title="台股籌碼終極雷達-趨勢版", layout="wide")
