@@ -1,8 +1,4 @@
-streamlit
-pandas
-yfinance
-numpy
-streamlit 
+
 
 # 設定頁面
 st.set_page_config(page_title="台股籌碼終極雷達-趨勢版", layout="wide")
