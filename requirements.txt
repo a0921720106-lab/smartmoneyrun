@@ -1,6 +1,4 @@
 streamlit
-FinMind
 pandas
-requests
-tqdm
 yfinance
+numpy
