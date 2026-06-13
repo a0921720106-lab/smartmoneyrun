@@ -90,89 +90,46 @@ with tab1:
             if candidates:
                 results = []
                 
-                # 修正點：使用一個獨立的空容器來放進度文字與進度條，避免 DOM 結構錯亂
-                progress_container = st.empty()
-                
-                for i, sid in enumerate(candidates):
-                    # 動態更新進度
-                    progress_container.info(f"🔍 正在檢查第 {i+1}/{len(candidates)} 檔標的的週震幅 ({sid})...")
+                # 【優化點 1】改用 st.status 容器，這在前端 React 機制中非常穩定，專門處理長負載進度
+                with st.status("🔍 正在下載市場價格並計算震幅...", expanded=True) as status:
+                    total_count = len(candidates)
                     
-                    amp = 999
-                    try:
-                        data = yf.download(f"{sid}.TW", period="10d", progress=False, multi_level_index=False)
-                        if data.empty:
-                            data = yf.download(f"{sid}.TWO", period="10d", progress=False, multi_level_index=False)
+                    for i, sid in enumerate(candidates):
+                        # 【優化點 2】不每檔都用大元件更新，直接更新 status 的文本提示即可
+                        status.update(label=f"⏳ 正在分析中... 目前進度 {i+1}/{total_count} (個股: {sid})")
                         
-                        if not data.empty:
-                            recent = data.tail(5)
-                            hi, lo = float(recent['High'].max()), float(recent['Low'].min())
-                            amp = round(((hi - lo) / lo) * 100, 2)
-                    except: 
-                        pass
+                        amp = 999
+                        try:
+                            data = yf.download(f"{sid}.TW", period="10d", progress=False, multi_level_index=False)
+                            if data.empty:
+                                data = yf.download(f"{sid}.TWO", period="10d", progress=False, multi_level_index=False)
+                            
+                            if not data.empty:
+                                recent = data.tail(5)
+                                hi, lo = float(recent['High'].max()), float(recent['Low'].min())
+                                amp = round(((hi - lo) / lo) * 100, 2)
+                        except: 
+                            pass
+                        
+                        if amp <= vol_limit:
+                            diff = big_pivot.loc[sid, t_new] - big_pivot.loc[sid, 'avg_big']
+                            results.append({
+                                "代號": sid, 
+                                "目前大戶%": f"{big_pivot.loc[sid, t_new]*100:.2f}%" if big_pivot.loc[sid, t_new] <= 1 else f"{big_pivot.loc[sid, t_new]:.2f}%", 
+                                "超額增持%": f"{diff*100:+.2f}%" if diff <= 1 and diff >= -1 else f"{diff:+.2f}%",
+                                "週震幅": f"{amp}%",
+                                "_sort_key": diff
+                            })
                     
-                    if amp <= vol_limit:
-                        diff = big_pivot.loc[sid, t_new] - big_pivot.loc[sid, 'avg_big']
-                        results.append({
-                            "代號": sid, 
-                            "目前大戶%": f"{big_pivot.loc[sid, t_new]*100:.2f}%" if big_pivot.loc[sid, t_new] <= 1 else f"{big_pivot.loc[sid, t_new]:.2f}%", 
-                            "超額增持%": f"{diff*100:+.2f}%" if diff <= 1 and diff >= -1 else f"{diff:+.2f}%",
-                            "週震幅": f"{amp}%",
-                            "_sort_key": diff  # 用於隱藏排序
-                        })
+                    # 結束後把進度狀態改成完成
+                    status.update(label="✅ 股價資料比對完成！", state="complete", expanded=False)
                 
-                # 掃描完畢，清除進度顯示
-                progress_container.empty()
-                
+                # 【優化點 3】最後在一起將結果繪製出來，徹底與迴圈隔離
                 if results:
                     st.success(f"🎯 篩選完成，符合震幅限制共 {len(results)} 檔")
                     res_df = pd.DataFrame(results).sort_values(by="_sort_key", ascending=False).drop(columns=["_sort_key"])
-                    # 修正點：改用 st.dataframe，渲染更穩健
                     st.dataframe(res_df, use_container_width=True)
                 else:
                     st.warning(f"❌ 籌碼合格，但這 {len(candidates)} 檔股票的週震幅皆超過 {vol_limit}%。")
             else:
                 st.info("目前沒有標的符合籌碼增持條件。")
-        else:
-            st.error("請先上傳 CSV 資料。")
-
-with tab2:
-    st.subheader("📋 填入目前持股 (輸入 4 碼代號)")
-    my_stocks_input = st.text_input("請輸入股票代號，用逗號或空白分隔（最多 10 檔）", value="", key="my_stocks_input_box")
-    my_stocks = [s.strip() for s in re.split(r'[ ,]+', my_stocks_input) if len(s.strip()) == 4][:10]
-
-    if st.button("分析私藏股趨勢", key="run_my_stocks") and my_stocks:
-        big_pivot, small_pivot, dates = process_trend_data()
-        if big_pivot is not None:
-            t_new = dates[0]
-            valid_stocks = [s for s in my_stocks if s in big_pivot.index]
-            
-            if not valid_stocks:
-                st.warning("輸入的代號在資料庫中找不到。")
-            else:
-                monitor_results = []
-                for sid in valid_stocks:
-                    history = big_pivot.loc[sid, dates].dropna()
-                    current = history[t_new]
-                    avg = history.mean()
-                    rank = (history < current).sum() / len(history) * 100
-                    status = "✅ 籌碼高檔" if current >= avg else "⚠️ 跌破均線"
-                    
-                    # 自動相容百分比格式
-                    c_val = current * 100 if current <= 1 else current
-                    a_val = avg * 100 if avg <= 1 else avg
-                    
-                    monitor_results.append({
-                        "代號": sid,
-                        "本週大戶%": f"{c_val:.2f}%",
-                        "歷史平均%": f"{a_val:.2f}%",
-                        "增減狀況": f"{c_val - a_val:+.2f}%",
-                        "大戶位階": f"贏過前 {rank:.0f}% 的週次",
-                        "狀態警示": status
-                    })
-                
-                st.dataframe(pd.DataFrame(monitor_results), use_container_width=True)
-                st.write("📈 私藏股大戶軌跡對比")
-                trend_df = big_pivot.loc[valid_stocks, reversed(dates)].T
-                st.line_chart(trend_df)
-        else:
-            st.error("請先上傳 CSV 資料。")
