@@ -1,8 +1,7 @@
 
-
 # 設定頁面
 st.set_page_config(page_title="台股籌碼終極雷達-趨勢版", layout="wide")
-st.title("🏹 台股籌碼：全市場掃描與自選監控")
+st.title("🏹 台股籌碼：全市場掃描與自選監6.0")
 
 # --- 1. 資料持久化與基礎設定 ---
 STORAGE_DIR = "saved_csv_data"
