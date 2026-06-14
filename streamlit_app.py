@@ -32,7 +32,6 @@ if uploaded_files:
     st.sidebar.success(f"檔案已儲存。")
 
 # --- 3. 核心處理邏輯 ---
-
 def process_trend_data():
     saved_paths = glob.glob(os.path.join(STORAGE_DIR, "*.csv"))
     if len(saved_paths) < 2:
@@ -80,7 +79,6 @@ with tab1:
             big_pivot['avg_big'] = big_pivot[dates].mean(axis=1)
             small_pivot['avg_small'] = small_pivot[dates].mean(axis=1)
             
-            # 初步籌碼篩選
             mask = (big_pivot[t_new] > (big_pivot['avg_big'] + strength_offset)) & \
                    (small_pivot[t_new] < small_pivot['avg_small']) & \
                    (big_pivot.index.str.len() == 4)
@@ -89,15 +87,10 @@ with tab1:
             
             if candidates:
                 results = []
-                
-                # 【優化點 1】改用 st.status 容器，這在前端 React 機制中非常穩定，專門處理長負載進度
                 with st.status("🔍 正在下載市場價格並計算震幅...", expanded=True) as status:
                     total_count = len(candidates)
-                    
                     for i, sid in enumerate(candidates):
-                        # 【優化點 2】不每檔都用大元件更新，直接更新 status 的文本提示即可
                         status.update(label=f"⏳ 正在分析中... 目前進度 {i+1}/{total_count} (個股: {sid})")
-                        
                         amp = 999
                         try:
                             data = yf.download(f"{sid}.TW", period="10d", progress=False, multi_level_index=False)
@@ -120,11 +113,8 @@ with tab1:
                                 "週震幅": f"{amp}%",
                                 "_sort_key": diff
                             })
-                    
-                    # 結束後把進度狀態改成完成
                     status.update(label="✅ 股價資料比對完成！", state="complete", expanded=False)
                 
-                # 【優化點 3】最後在一起將結果繪製出來，徹底與迴圈隔離
                 if results:
                     st.success(f"🎯 篩選完成，符合震幅限制共 {len(results)} 檔")
                     res_df = pd.DataFrame(results).sort_values(by="_sort_key", ascending=False).drop(columns=["_sort_key"])
@@ -133,3 +123,53 @@ with tab1:
                     st.warning(f"❌ 籌碼合格，但這 {len(candidates)} 檔股票的週震幅皆超過 {vol_limit}%。")
             else:
                 st.info("目前沒有標的符合籌碼增持條件。")
+        else:
+            st.error("❌ 請先上傳至少 2 週以上的集保 CSV 資料，並確認側邊欄顯示儲存成功。")
+
+with tab2:
+    st.subheader("📋 填入目前持股 (輸入 4 碼代號)")
+    
+    my_stocks_input = st.text_input("請輸入股票代號，用逗號或空白分隔（最多 10 檔）", value="2330, 2317", key="my_stocks_input_box")
+    my_stocks = [s.strip() for s in re.split(r'[ ,]+', my_stocks_input) if len(s.strip()) == 4][:10]
+    
+    btn_analyze = st.button("分析私藏股趨勢", key="run_my_stocks")
+
+    if btn_analyze:
+        if not my_stocks:
+            st.warning("⚠️ 請先輸入至少一檔 4 位數的股票代號。")
+        else:
+            big_pivot, small_pivot, dates = process_trend_data()
+            if big_pivot is not None:
+                t_new = dates[0]
+                valid_stocks = [s for s in my_stocks if s in big_pivot.index]
+                
+                if not valid_stocks:
+                    st.warning("⚠️ 輸入的代號在您上傳的資料庫中找不到，請確認這幾檔股票本週是否有集保資料。")
+                else:
+                    monitor_results = []
+                    for sid in valid_stocks:
+                        history = big_pivot.loc[sid, dates].dropna()
+                        current = history[t_new]
+                        avg = history.mean()
+                        rank = (history < current).sum() / len(history) * 100
+                        status = "✅ 籌碼高檔" if current >= avg else "⚠️ 跌破均線"
+                        
+                        c_val = current * 100 if current <= 1 else current
+                        a_val = avg * 100 if avg <= 1 else avg
+                        
+                        # 【已修正】這裡加上了原本漏掉的冒號
+                        monitor_results.append({
+                            "代號": sid,
+                            "本週大戶%": f"{c_val:.2f}%",
+                            "歷史平均%": f"{a_val:.2f}%",
+                            "增減狀況": f"{c_val - a_val:+.2f}%",
+                            "大戶位階": f"贏過前 {rank:.0f}% 的週次",
+                            "狀態警示": status
+                        })
+                    
+                    st.dataframe(pd.DataFrame(monitor_results), use_container_width=True)
+                    st.write("📈 私藏股大戶軌跡對比")
+                    trend_df = big_pivot.loc[valid_stocks, reversed(dates)].T
+                    st.line_chart(trend_df)
+            else:
+                st.error("❌ 雲端資料庫目前沒有足夠的 CSV 檔案。請先在側邊欄上傳資料，或確認檔案是否毀損。")
